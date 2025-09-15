@@ -13,6 +13,12 @@ class Applications {
         addRunningApplications(NSWorkspace.shared.runningApplications)
     }
 
+    static func manuallyRefreshAllWindows() {
+        for app in list {
+            app.manuallyUpdateWindows()
+        }
+    }
+
     static func addRunningApplications(_ runningApps: [NSRunningApplication]) {
         runningApps.forEach {
             let bundleIdentifier = $0.bundleIdentifier
@@ -20,7 +26,8 @@ class Applications {
             if bundleIdentifier == "com.apple.dock" {
                 DockEvents.observe(processIdentifier)
             }
-            if isActualApplication(processIdentifier, bundleIdentifier) {
+            // com.apple.universalcontrol always fails subscribeToNotification. We blacklist it to save resources on everyone's machines
+            if bundleIdentifier != "com.apple.universalcontrol" && isActualApplication(processIdentifier, bundleIdentifier) {
                 Applications.list.append(Application($0))
             }
         }

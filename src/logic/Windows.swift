@@ -74,7 +74,7 @@ class Windows {
     static func updateIsFullscreenOnCurrentSpace() {
         let windowsOnCurrentSpace = Windows.list.filter { !$0.isWindowlessApp }
         for window in windowsOnCurrentSpace {
-            AXUIElement.retryAxCallUntilTimeout(after: .now() + .milliseconds(AXUIElement.retryDelayInMilliseconds)) { [weak window] in
+            AXUIElement.retryAxCallUntilTimeout(context: window.debugId, after: .now() + humanPerceptionDelay) { [weak window] in
                 guard let window else { return }
                 try updateWindowSizeAndPositionAndFullscreen(window.axUiElement!, window.cgWindowId!, window)
             }
@@ -327,7 +327,7 @@ class Windows {
 
     private static func screenshotEligibleWindowsAndRefreshUi(_ eligibleWindows: [Window], _ source: RefreshCausedBy) {
         for window in eligibleWindows {
-            BackgroundWork.screenshotsQueue.async { [weak window] in
+            BackgroundWork.screenshotsQueue.addOperation { [weak window] in
                 if source == .refreshOnlyThumbnailsAfterShowUi && !App.app.appIsBeingUsed { return }
                 if let wid = window?.cgWindowId, let cgImage = wid.screenshot() {
                     if source == .refreshOnlyThumbnailsAfterShowUi && !App.app.appIsBeingUsed { return }
@@ -365,6 +365,7 @@ class Windows {
                 }
             } ?? false) &&
             !(Preferences.appsToShow[App.app.shortcutIndex] == .active && window.application.pid != NSWorkspace.shared.frontmostApplication?.processIdentifier) &&
+            !(Preferences.appsToShow[App.app.shortcutIndex] == .nonActive && window.application.pid == NSWorkspace.shared.frontmostApplication?.processIdentifier) &&
             !(!(Preferences.showHiddenWindows[App.app.shortcutIndex] != .hide) && window.isHidden) &&
             ((Preferences.showWindowlessApps[App.app.shortcutIndex] != .hide && window.isWindowlessApp) ||
                 !window.isWindowlessApp &&

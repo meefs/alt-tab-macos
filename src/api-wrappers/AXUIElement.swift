@@ -7,73 +7,93 @@ import ApplicationServices.HIServices.AXAttributeConstants
 import ApplicationServices.HIServices.AXActionConstants
 
 extension AXUIElement {
-    static let globalTimeoutInSeconds = Float(120)
-    // 250ms is similar to human delay in processing changes on screen
-    // See https://humanbenchmark.com/tests/reactiontime
-    static let retryDelayInMilliseconds = 250
+    // default timeout for AX calls is 6s
+    // we reduce to 1s to avoid AX calls blocking threads, thus too many threads getting created to make the next AX calls
+    private static let globalMessagingTimeoutInSeconds = Float(1)
+    // if an app times out our AX calls, we retry for 6s then give up
+    private static let axCallsRetriesQueueTimeoutInSeconds = Float(6)
+    // once an app is unresponsive, let's ignore other AX calls for it to avoid congestion
+    private static var axCallsRetriesQueueUnresponsiveAppsMap = ConcurrentMap<pid_t, UInt64>()
+    // some events like window resizing trigger in quick succession. We debounce those
+    private static var eventsDebounceMap = ConcurrentMap<String, DispatchWorkItem>()
 
-    // default timeout for AX calls is 6s. We increase it in order to avoid retrying every 6s, thus saving resources
     static func setGlobalTimeout() {
-        // we add 5s to make sure to not do an extra retry
-        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), globalTimeoutInSeconds + 5)
-    }
-
-    static var windowResizedOrMovedMap = DebounceMap()
-    static var windowTitleChangedMap = DebounceMap()
-
-    typealias DebounceMap = [CGWindowID: DispatchWorkItem]
-
-    enum DebounceType {
-        case windowResizedOrMoved
-        case windowTitleChanged
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), globalMessagingTimeoutInSeconds)
     }
 
     /// if the window server is busy, it may not reply to AX calls. We retry right before the call times-out and returns a bogus value
-    static func retryAxCallUntilTimeout(after: DispatchTime = .now(), timeoutInSeconds: Double = Double(AXUIElement.globalTimeoutInSeconds), execute: @escaping () throws -> Void) {
-        BackgroundWork.axCallsQueue.asyncAfter(deadline: after) {
-            retryAxCallUntilTimeout_(timeoutInSeconds: timeoutInSeconds, after: after, execute: execute)
-        }
-    }
-
-    static func retryAxCallUntilTimeoutDebounced(_ debounceType: DebounceType, _ wid: CGWindowID, execute: @escaping () throws -> Void) {
-        let workItem = DispatchWorkItem {
-            retryAxCallUntilTimeout_(timeoutInSeconds: Double(globalTimeoutInSeconds), execute: execute)
-        }
-        // use .barrier to avoid accessing the DebounceMaps concurrently
-        BackgroundWork.axCallsQueue.async(flags: .barrier) {
-            switch debounceType {
-                case .windowResizedOrMoved:
-                    windowResizedOrMovedMap[wid]?.cancel()
-                    windowResizedOrMovedMap[wid] = workItem
-                case .windowTitleChanged:
-                    windowTitleChangedMap[wid]?.cancel()
-                    windowTitleChangedMap[wid] = workItem
+    static func retryAxCallUntilTimeout(file: String = #file, function: String = #function, line: Int = #line, context: String = "", after: DispatchTime? = nil, debounceType: DebounceType? = nil, pid: pid_t? = nil, wid: CGWindowID? = nil, retriesQueue: Bool = false, startTimeInNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds, block: @escaping () throws -> Void) {
+        let closure = { retryAxCallUntilTimeout_(file: file, function: function, line: line, context: context, after: after, debounceType: debounceType, pid: pid, wid: wid, retriesQueue: retriesQueue, startTimeInNanoseconds: startTimeInNanoseconds, block: block) }
+        let queue = retriesQueue ? BackgroundWork.axCallsRetriesQueue : BackgroundWork.axCallsFirstAttemptQueue
+        if let after {
+            queue!.addOperationAfter(deadline: after, block: closure)
+        } else if let debounceType, let wid {
+            let debounceMapKey = "\(debounceType.rawValue)\(wid)"
+            let workItem = DispatchWorkItem {
+                closure()
+                eventsDebounceMap.withLock { $0[debounceMapKey] = nil }
             }
+            eventsDebounceMap.withLock {
+                $0[debounceMapKey]?.cancel()
+                $0[debounceMapKey] = workItem
+            }
+            queue!.addOperationAfter(deadline: .now() + humanPerceptionDelay) {
+                workItem.perform()
+            }
+        } else {
+            queue!.addOperation(closure)
         }
-        BackgroundWork.axCallsQueue.asyncAfter(deadline: .now() + .milliseconds(retryDelayInMilliseconds), execute: workItem)
     }
 
-    private static func retryAxCallUntilTimeout_(timeoutInSeconds: Double, after: DispatchTime = DispatchTime.now(), execute: @escaping () throws -> Void) {
-        do {
-            try execute()
-        } catch {
-            let timePassedInSeconds = Double(DispatchTime.now().uptimeNanoseconds - after.uptimeNanoseconds) / 1_000_000_000
-            if timePassedInSeconds < timeoutInSeconds {
-                BackgroundWork.axCallsQueue.asyncAfter(deadline: .now() + .milliseconds(retryDelayInMilliseconds)) {
-                    retryAxCallUntilTimeout_(timeoutInSeconds: timeoutInSeconds, after: after, execute: execute)
+    private static func retryAxCallUntilTimeout_(file: String, function: String, line: Int, context: String, after: DispatchTime?, debounceType: DebounceType?, pid: pid_t?, wid: CGWindowID?, retriesQueue: Bool, startTimeInNanoseconds: UInt64, block: @escaping () throws -> Void) {
+        // attempt the AX call
+        if (try? block()) != nil {
+            return
+        }
+        // do we already have ongoing retries for this pid?
+        if let pid {
+            axCallsRetriesQueueUnresponsiveAppsMap.lock.lock()
+            let time = axCallsRetriesQueueUnresponsiveAppsMap.map[pid]
+            axCallsRetriesQueueUnresponsiveAppsMap.lock.unlock()
+            if let time {
+                if startTimeInNanoseconds > time {
+                    // new most recent call; replace and retry
+                    axCallsRetriesQueueUnresponsiveAppsMap.withLock { $0[pid] = startTimeInNanoseconds }
+                } else if startTimeInNanoseconds == time {
+                    // most recent call; retry
+                } else {
+                    // old call which has been replaced; ignore
+                    return
                 }
+            } else {
+                // first call; set and retry
+                axCallsRetriesQueueUnresponsiveAppsMap.withLock { $0[pid] = startTimeInNanoseconds }
             }
         }
+        // should we give up?
+        let timePassedInSeconds = Float(DispatchTime.now().uptimeNanoseconds - startTimeInNanoseconds) / 1_000_000_000
+        if timePassedInSeconds >= axCallsRetriesQueueTimeoutInSeconds {
+            Logger.info("AX call failed for more than \(Int(axCallsRetriesQueueTimeoutInSeconds))s. Giving up on it", logFromContext(file, function, line, context))
+            if let pid {
+                axCallsRetriesQueueUnresponsiveAppsMap.withLock { $0.removeValue(forKey: pid) }
+            }
+            return
+        }
+        // retry
+        Logger.info(logFromContext(file, function, line, context))
+        retryAxCallUntilTimeout(file: file, function: function, line: line, context: context, after: .now() + humanPerceptionDelay, debounceType: debounceType, pid: pid, wid: wid, retriesQueue: true, startTimeInNanoseconds: startTimeInNanoseconds, block: block)
     }
 
-    func axCallWhichCanThrow<T>(_ result: AXError, _ successValue: inout T) throws -> T? {
-        switch result {
-            case .success: return successValue
-            // .cannotComplete can happen if the app is unresponsive; we throw in that case to retry until the call succeeds
-            case .cannotComplete: throw AxError.runtimeError
-            // for other errors it's pointless to retry
-            default: return nil
+    private static func logFromContext(_ file: String, _ function: String, _ line: Int, _ context: String) -> String {
+        return "Context: \((file as NSString).lastPathComponent):\(line) \(function) \(context)"
+    }
+
+    func throwIfNotSuccess(_ result: AXError) throws -> Void {
+        // .cannotComplete can happen if the app is unresponsive
+        if result == .cannotComplete {
+            throw AxError.runtimeError
         }
+        // for success or other errors we don't throw
     }
 
     // periphery:ignore
@@ -85,19 +105,22 @@ extension AXUIElement {
         return bytePtr?.withMemoryRebound(to: AXUIElementID.self, capacity: 1) { $0.pointee }
     }
 
-    func cgWindowId() throws -> CGWindowID? {
+    func cgWindowId() throws -> CGWindowID {
         var id = CGWindowID(0)
-        return try axCallWhichCanThrow(_AXUIElementGetWindow(self, &id), &id)
+        try throwIfNotSuccess(_AXUIElementGetWindow(self, &id))
+        return id
     }
 
-    func pid() throws -> pid_t? {
+    func pid() throws -> pid_t {
         var pid = pid_t(0)
-        return try axCallWhichCanThrow(AXUIElementGetPid(self, &pid), &pid)
+        try throwIfNotSuccess(AXUIElementGetPid(self, &pid))
+        return pid
     }
 
     func attribute<T>(_ key: String, _ _: T.Type) throws -> T? {
-        var value: AnyObject?
-        return try axCallWhichCanThrow(AXUIElementCopyAttributeValue(self, key as CFString, &value), &value) as? T
+        var attributeValue: AnyObject?
+        try throwIfNotSuccess(AXUIElementCopyAttributeValue(self, key as CFString, &attributeValue))
+        return attributeValue as? T
     }
 
     func windowAttributes() throws -> (String?, String?, String?, Bool, Bool)? {
@@ -109,7 +132,8 @@ extension AXUIElement {
             kAXFullscreenAttribute,
         ]
         var values: CFArray?
-        if let array = ((try axCallWhichCanThrow(AXUIElementCopyMultipleAttributeValues(self, attributes as CFArray, [], &values), &values)) as? Array<Any>) {
+        try throwIfNotSuccess(AXUIElementCopyMultipleAttributeValues(self, attributes as CFArray, [], &values))
+        if let array = (values as? Array<Any>) {
             return (
                 array[0] as? String,
                 array[1] as? String,
@@ -401,25 +425,30 @@ extension AXUIElement {
         return (app.bundleIdentifier?.hasPrefix("com.autodesk.AutoCAD") ?? false) && subrole == kAXDocumentWindowSubrole
     }
 
-    func focusWindow() {
-        performAction(kAXRaiseAction)
+    func focusWindow() throws {
+        try performAction(kAXRaiseAction)
     }
 
-    func setAttribute(_ key: String, _ value: Any) {
-        AXUIElementSetAttributeValue(self, key as CFString, value as CFTypeRef)
+    func setAttribute(_ key: String, _ value: Any) throws {
+        try throwIfNotSuccess(AXUIElementSetAttributeValue(self, key as CFString, value as CFTypeRef))
     }
 
-    func performAction(_ action: String) {
-        AXUIElementPerformAction(self, action as CFString)
+    func performAction(_ action: String) throws {
+        try throwIfNotSuccess(AXUIElementPerformAction(self, action as CFString))
     }
 
-    func subscribeToNotification(_ axObserver: AXObserver, _ notification: String, _ callback: (() -> Void)? = nil) throws {
+    @discardableResult
+    func subscribeToNotification(_ axObserver: AXObserver, _ notification: String, _ callback: (() -> Void)? = nil) throws -> Bool {
         let result = AXObserverAddNotification(axObserver, self, notification as CFString, nil)
         if result == .success || result == .notificationAlreadyRegistered {
-            callback?()
-        } else if result != .notificationUnsupported && result != .notImplemented {
-            throw AxError.runtimeError
+            return true
         }
+        if result == .notificationUnsupported || result == .notImplemented {
+            // subscription will never succeed
+            return false
+        }
+        // temporary issue; subscription may succeed if retried
+        throw AxError.runtimeError
     }
 }
 
@@ -432,3 +461,20 @@ enum AxError: Error {
 /// this means that long-lived apps (e.g. Finder) may have high IDs
 /// we don't know how high it can go, and if it wraps around
 typealias AXUIElementID = UInt64
+
+enum DebounceType: Int {
+    case windowResizedOrMoved = 0
+    case windowTitleChanged = 1
+}
+
+class ConcurrentMap<K: Hashable, V> {
+    var map = [K: V]()
+    let lock = NSLock()
+
+    @discardableResult
+    func withLock<T>(_ block: (inout [K: V]) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return block(&map)
+    }
+}

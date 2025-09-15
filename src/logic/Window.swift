@@ -24,6 +24,7 @@ class Window {
     var application: Application
     var axObserver: AXObserver?
     var rowIndex: Int?
+    var debugId: String { "(wid:\(cgWindowId.map { String(describing: $0) } ?? "nil")) \(title ?? "nil")) \(application.debugId)" }
 
     static let notifications = [
         kAXUIElementDestroyedNotification,
@@ -48,7 +49,7 @@ class Window {
         creationOrder = Window.globalCreationCounter
         application.removeWindowslessAppWindow()
         checkIfFocused(application, wid)
-        Logger.debug("Adding window", cgWindowId ?? "nil", title ?? "nil", application.bundleIdentifier ?? "nil")
+        Logger.debug(debugId)
         observeEvents()
     }
 
@@ -57,17 +58,17 @@ class Window {
         title = bestEffortTitle(nil)
         Window.globalCreationCounter += 1
         creationOrder = Window.globalCreationCounter
-        Logger.debug(title ?? "nil", application.bundleIdentifier ?? "nil")
+        Logger.debug(debugId)
     }
 
     deinit {
-        Logger.debug(title ?? "nil", application.bundleIdentifier ?? "nil")
+        Logger.debug(debugId)
     }
 
     /// some apps will not trigger AXApplicationActivated, where we usually update application.focusedWindow
     /// workaround: we check and possibly do it here
     func checkIfFocused(_ application: Application, _ wid: CGWindowID) {
-        AXUIElement.retryAxCallUntilTimeout {
+        AXUIElement.retryAxCallUntilTimeout(context: debugId, pid: application.pid) {
             let focusedWid = try application.axUiElement?.focusedWindow()?.cgWindowId()
             if wid == focusedWid {
                 application.focusedWindow = self
@@ -85,9 +86,13 @@ class Window {
         AXObserverCreate(application.pid, axObserverCallback, &axObserver)
         guard let axObserver else { return }
         for notification in Window.notifications {
-            AXUIElement.retryAxCallUntilTimeout { [weak self] in
+            AXUIElement.retryAxCallUntilTimeout(context: debugId, pid: application.pid) { [weak self] in
                 guard let self else { return }
-                try self.axUiElement!.subscribeToNotification(axObserver, notification, nil)
+                if try self.axUiElement!.subscribeToNotification(axObserver, notification) {
+                    if notification == kAXUIElementDestroyedNotification {
+                        Logger.debug("Subscribed to window", self.debugId)
+                    }
+                }
             }
         }
         CFRunLoopAddSource(BackgroundWork.accessibilityEventsThread.runLoop, AXObserverGetRunLoopSource(axObserver), .commonModes)
@@ -115,13 +120,13 @@ class Window {
             NSSound.beep()
             return
         }
-        BackgroundWork.accessibilityCommandsQueue.async { [weak self] in
+        BackgroundWork.accessibilityCommandsQueue.addOperation { [weak self] in
             guard let self else { return }
             if self.isFullscreen {
-                self.axUiElement!.setAttribute(kAXFullscreenAttribute, false)
+                try? self.axUiElement!.setAttribute(kAXFullscreenAttribute, false)
             }
             if let closeButton_ = try? self.axUiElement!.closeButton() {
-                closeButton_.performAction(kAXPressAction)
+                try? closeButton_.performAction(kAXPressAction)
             }
         }
     }
@@ -135,17 +140,17 @@ class Window {
             NSSound.beep()
             return
         }
-        BackgroundWork.accessibilityCommandsQueue.async { [weak self] in
+        BackgroundWork.accessibilityCommandsQueue.addOperation { [weak self] in
             guard let self else { return }
             if self.isFullscreen {
-                self.axUiElement!.setAttribute(kAXFullscreenAttribute, false)
+                try? self.axUiElement!.setAttribute(kAXFullscreenAttribute, false)
                 // minimizing is ignored if sent immediatly; we wait for the de-fullscreen animation to be over
-                BackgroundWork.accessibilityCommandsQueue.asyncAfter(deadline: .now() + .seconds(1)) { [weak self] in
+                BackgroundWork.accessibilityCommandsQueue.addOperationAfter(deadline: .now() + .seconds(1)) { [weak self] in
                     guard let self else { return }
-                    self.axUiElement!.setAttribute(kAXMinimizedAttribute, true)
+                    try? self.axUiElement!.setAttribute(kAXMinimizedAttribute, true)
                 }
             } else {
-                self.axUiElement!.setAttribute(kAXMinimizedAttribute, !self.isMinimized)
+                try? self.axUiElement!.setAttribute(kAXMinimizedAttribute, !self.isMinimized)
             }
         }
     }
@@ -155,9 +160,9 @@ class Window {
             NSSound.beep()
             return
         }
-        BackgroundWork.accessibilityCommandsQueue.async { [weak self] in
+        BackgroundWork.accessibilityCommandsQueue.addOperation { [weak self] in
             guard let self else { return }
-            self.axUiElement!.setAttribute(kAXFullscreenAttribute, !self.isFullscreen)
+            try? self.axUiElement!.setAttribute(kAXFullscreenAttribute, !self.isFullscreen)
         }
     }
 
@@ -180,13 +185,13 @@ class Window {
             // macOS bug: when switching to a System Preferences window in another space, it switches to that space,
             // but quickly switches back to another window in that space
             // You can reproduce this buggy behaviour by clicking on the dock icon, proving it's an OS bug
-            BackgroundWork.accessibilityCommandsQueue.async { [weak self] in
+            BackgroundWork.accessibilityCommandsQueue.addOperation { [weak self] in
                 guard let self else { return }
                 var psn = ProcessSerialNumber()
                 GetProcessForPID(self.application.pid, &psn)
                 _SLPSSetFrontProcessWithOptions(&psn, self.cgWindowId!, SLPSMode.userGenerated.rawValue)
                 self.makeKeyWindow(&psn)
-                self.axUiElement!.focusWindow()
+                try? self.axUiElement!.focusWindow()
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
                     Windows.previewFocusedWindowIfNeeded()
                 }

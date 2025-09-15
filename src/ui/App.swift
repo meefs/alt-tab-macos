@@ -123,7 +123,7 @@ class App: AppCenterApplication {
     func focusTarget() {
         guard appIsBeingUsed else { return } // already hidden
         let focusedWindow = Windows.focusedWindow()
-        Logger.info(focusedWindow?.cgWindowId.map { String(describing: $0) } ?? "nil", focusedWindow?.title ?? "nil", focusedWindow?.application.pid ?? "nil", focusedWindow?.application.bundleIdentifier ?? "nil")
+        Logger.info(focusedWindow?.debugId)
         focusSelectedWindow(focusedWindow)
     }
 
@@ -189,7 +189,8 @@ class App: AppCenterApplication {
         hideUi(true)
         if let window = selectedWindow, MissionControl.state() == .inactive || MissionControl.state() == .showDesktop {
             window.focus()
-            if Preferences.cursorFollowFocusEnabled {
+            if Preferences.cursorFollowFocus == .always || (
+                Preferences.cursorFollowFocus == .differentScreen && (Spaces.screenSpacesMap.first { $0.value.contains { space in window.spaceIds.contains(space) } })?.key != NSScreen.active()?.uuid()) {
                 moveCursorToSelectedWindow(window)
             }
         } else {
@@ -237,13 +238,14 @@ class App: AppCenterApplication {
         Logger.debug(shortcutIndex, self.shortcutIndex, isFirstSummon)
         App.app.appIsBeingUsed = true
         if isFirstSummon || shortcutIndex != self.shortcutIndex {
+            NSScreen.updatePreferred()
+            Applications.manuallyRefreshAllWindows()
             if isVeryFirstSummon {
                 Windows.sortByLevel()
                 isVeryFirstSummon = false
             }
             isFirstSummon = false
             self.shortcutIndex = shortcutIndex
-            NSScreen.updatePreferred()
             if !Windows.updatesBeforeShowing() { hideUi(); return }
             Windows.setInitialFocusedAndHoveredWindowIndex()
             if Preferences.windowDisplayDelay == DispatchTimeInterval.milliseconds(0) {
