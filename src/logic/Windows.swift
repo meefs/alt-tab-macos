@@ -314,7 +314,10 @@ class Windows {
     }
 
     // dispatch screenshot requests off the main-thread, then wait for completion
-    static func refreshThumbnails(_ windows: [Window], _ source: RefreshCausedBy) {
+    static func refreshThumbnailsAsync(_ windows: [Window], _ source: RefreshCausedBy) {
+        guard !windows.isEmpty && SystemPermissions.screenRecordingPermission == .granted
+               && !Preferences.onlyShowApplications()
+               && (!Appearance.hideThumbnails || Preferences.previewFocusedWindow) else { return }
         var eligibleWindows = [Window]()
         for window in windows {
             if !window.isWindowlessApp, let cgWindowId = window.cgWindowId, cgWindowId != CGWindowID(bitPattern: -1) {
@@ -322,10 +325,10 @@ class Windows {
             }
         }
         if eligibleWindows.isEmpty { return }
-        screenshotEligibleWindowsAndRefreshUi(eligibleWindows, source)
+        screenshotEligibleWindowsAndUpdateUi(eligibleWindows, source)
     }
 
-    private static func screenshotEligibleWindowsAndRefreshUi(_ eligibleWindows: [Window], _ source: RefreshCausedBy) {
+    private static func screenshotEligibleWindowsAndUpdateUi(_ eligibleWindows: [Window], _ source: RefreshCausedBy) {
         for window in eligibleWindows {
             BackgroundWork.screenshotsQueue.addOperation { [weak window] in
                 if source == .refreshOnlyThumbnailsAfterShowUi && !App.app.appIsBeingUsed { return }

@@ -42,12 +42,6 @@ class App: AppCenterApplication {
         fatalError("Class only supports programmatic initialization")
     }
 
-    /// pre-load some windows so they are faster on first display
-    private func preloadWindows() {
-        thumbnailsPanel.orderFront(nil)
-        thumbnailsPanel.orderOut(nil)
-    }
-
     /// we put application code here which should be executed on init() and Preferences change
     func resetPreferencesDependentComponents() {
         thumbnailsPanel.thumbnailsView.reset()
@@ -86,11 +80,15 @@ class App: AppCenterApplication {
 
     /// we don't want another window to become key when the thumbnailPanel is hidden
     func hideThumbnailPanelWithoutChangingKeyWindow() {
-        preferencesWindow.canBecomeKey_ = false
-        feedbackWindow.canBecomeKey_ = false
+        allSecondaryWindowsCanBecomeKey(false)
         thumbnailsPanel.orderOut(nil)
-        preferencesWindow.canBecomeKey_ = true
-        feedbackWindow.canBecomeKey_ = true
+        allSecondaryWindowsCanBecomeKey(true)
+    }
+
+    private func allSecondaryWindowsCanBecomeKey(_ canBecomeKey_: Bool) {
+        preferencesWindow.canBecomeKey_ = canBecomeKey_
+        feedbackWindow.canBecomeKey_ = canBecomeKey_
+        permissionsWindow.canBecomeKey_ = canBecomeKey_
     }
 
     func closeSelectedWindow() {
@@ -199,12 +197,7 @@ class App: AppCenterApplication {
     }
 
     func refreshOpenUi(_ windowsToScreenshot: [Window], _ source: RefreshCausedBy) {
-        if !windowsToScreenshot.isEmpty && SystemPermissions.screenRecordingPermission == .granted
-               && !Preferences.onlyShowApplications()
-               && (!Appearance.hideThumbnails || Preferences.previewFocusedWindow) {
-            Windows.refreshThumbnails(windowsToScreenshot, source)
-            if source == .refreshOnlyThumbnailsAfterShowUi { return }
-        }
+        Windows.refreshThumbnailsAsync(windowsToScreenshot, source)
         guard appIsBeingUsed else { return }
         if source == .refreshUiAfterExternalEvent {
             if !Windows.updatesBeforeShowing() { hideUi(); return }
@@ -212,12 +205,7 @@ class App: AppCenterApplication {
         guard appIsBeingUsed else { return }
         Windows.updateFocusedWindowIndex()
         guard appIsBeingUsed else { return }
-        thumbnailsPanel.thumbnailsView.updateItemsAndLayout()
-        guard appIsBeingUsed else { return }
-        thumbnailsPanel.setContentSize(thumbnailsPanel.thumbnailsView.frame.size)
-        thumbnailsPanel.display()
-        guard appIsBeingUsed else { return }
-        NSScreen.preferred.repositionPanel(thumbnailsPanel)
+        thumbnailsPanel.updateContents()
         guard appIsBeingUsed else { return }
         Windows.voiceOverWindow() // at this point ThumbnailViews are assigned to the window, and ready
         guard appIsBeingUsed else { return }
@@ -263,13 +251,11 @@ class App: AppCenterApplication {
         guard appIsBeingUsed else { return }
         Appearance.update()
         guard appIsBeingUsed else { return }
-        thumbnailsPanel.makeKeyAndOrderFront(nil) // workaround: without this, switching between 2 screens make thumbnailPanel invisible
-        KeyRepeatTimer.toggleRepeatingKeyNextWindow()
-        guard appIsBeingUsed else { return }
         refreshOpenUi([], .showUi)
         guard appIsBeingUsed else { return }
         thumbnailsPanel.show()
-        refreshOpenUi(Windows.list, .refreshOnlyThumbnailsAfterShowUi)
+        KeyRepeatTimer.toggleRepeatingKeyNextWindow()
+        Windows.refreshThumbnailsAsync(Windows.list, .refreshOnlyThumbnailsAfterShowUi)
     }
 
     func checkIfShortcutsShouldBeDisabled(_ activeWindow: Window?, _ activeApp: NSRunningApplication?) {
@@ -326,7 +312,6 @@ extension App: NSApplicationDelegate {
             MouseEvents.observe()
             TrackpadEvents.observe()
             CliEvents.observe()
-            self.preloadWindows()
             Logger.info("AltTab finished launching")
             #if DEBUG
 //            self.showPreferencesWindow()

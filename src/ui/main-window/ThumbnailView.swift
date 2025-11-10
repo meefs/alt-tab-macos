@@ -2,18 +2,20 @@ import Cocoa
 
 class ThumbnailView: FlippedView {
     static let noOpenWindowToolTip = NSLocalizedString("App is running but has no open window", comment: "")
+    // when calculating the width of a nstextfield, somehow we need to add this suffix to get the correct width
+    static let extraTextForPadding = "lmnopqrstuvw"
     var window_: Window?
     var thumbnail = LightImageView()
     var windowlessIcon = LightImageView()
     let thumbnailContainer = FlippedView()
     var appIcon = LightImageView()
-    var label = ThumbnailTitleView(shadow: ThumbnailView.makeShadow(Appearance.titleShadowColor), font: Appearance.font)
+    var label = ThumbnailTitleView(font: Appearance.font)
     var fullscreenIcon = ThumbnailFontIconView(symbol: .circledPlusSign, tooltip: NSLocalizedString("Window is fullscreen", comment: ""))
     var minimizedIcon = ThumbnailFontIconView(symbol: .circledMinusSign, tooltip: NSLocalizedString("Window is minimized", comment: ""))
     var hiddenIcon = ThumbnailFontIconView(symbol: .circledSlashSign, tooltip: NSLocalizedString("App is hidden", comment: ""))
     var spaceIcon = ThumbnailFontIconView(symbol: .circledNumber0)
     var dockLabelIcon = ThumbnailFilledFontIconView(
-        ThumbnailFontIconView(symbol: .filledCircledNumber0, size: dockLabelLabelSize(), color: NSColor(srgbRed: 1, green: 0.30, blue: 0.25, alpha: 1), shadow: nil),
+        ThumbnailFontIconView(symbol: .filledCircledNumber0, size: dockLabelLabelSize(), color: NSColor(srgbRed: 1, green: 0.30, blue: 0.25, alpha: 1)),
         backgroundColor: NSColor.white, size: dockLabelLabelSize())
     var quitIcon = TrafficLightButton(.quit, NSLocalizedString("Quit app", comment: ""))
     var closeIcon = TrafficLightButton(.close, NSLocalizedString("Close window", comment: ""))
@@ -134,7 +136,6 @@ class ThumbnailView: FlippedView {
         let isHovered = indexInRecycledViews == Windows.hoveredWindowIndex
         setBackground(isFocused: isFocused, isHovered: isHovered)
         setBorder(isFocused: isFocused, isHovered: isHovered)
-        setShadow(isFocused: isFocused, isHovered: isHovered)
         if Preferences.appearanceStyle == .appIcons {
             label.isHidden = !(isFocused || isHovered)
             updateAppIconsLabel(isFocused: isFocused, isHovered: isHovered)
@@ -176,17 +177,18 @@ class ThumbnailView: FlippedView {
         setAccessibilityChildren([])
         wantsLayer = true
         layer!.masksToBounds = false // without this, label will be clipped in app-icons style since its larger than its parentView
-        setupSharedSubiews()
+        setupSharedSubviews()
         setupStyleSpecificSubviews()
     }
 
-    private func setupSharedSubiews() {
-        let shadow = ThumbnailView.makeShadow(Appearance.imageShadowColor)
+    private func setupSharedSubviews() {
+        let shadow = ThumbnailView.makeShadow(Appearance.imagesShadowColor)
         thumbnailContainer.wantsLayer = true
         thumbnailContainer.layer!.masksToBounds = false // let thumbnail shadows show
         thumbnail.shadow = shadow
         windowlessIcon.shadow = shadow
         appIcon.shadow = shadow
+        dockLabelIcon.shadow = shadow
         windowlessIcon.translatesAutoresizingMaskIntoConstraints = false
         windowlessIcon.toolTip = ThumbnailView.noOpenWindowToolTip
         appIcon.translatesAutoresizingMaskIntoConstraints = false
@@ -250,15 +252,6 @@ class ThumbnailView: FlippedView {
         }
     }
 
-    private func setShadow(isFocused: Bool, isHovered: Bool) {
-        if (isFocused || isHovered) && Appearance.highlightBorderShadowColor != .clear {
-            vStackView.layer!.shadowColor = Appearance.highlightBorderShadowColor.cgColor
-            vStackView.layer!.shadowOpacity = 0.25
-            vStackView.layer!.shadowOffset = .zero
-            vStackView.layer!.shadowRadius = 1
-        }
-    }
-
     private func updateAppIconsLabel(isFocused: Bool, isHovered: Bool) {
         let focusedView = ThumbnailsView.recycledViews[Windows.focusedWindowIndex]
         var hoveredView: ThumbnailView? = nil
@@ -285,7 +278,7 @@ class ThumbnailView: FlippedView {
         let availableRightWidth = view.isLastInRow ? 0 : CGFloat(view.numberOfViewsInRow - 1 - view.indexInRow) * viewWidth
         let totalWidth = availableLeftWidth + availableRightWidth + viewWidth
         let maxLabelWidth = min(totalWidth, maxAllowedWidth)
-        return maxLabelWidth
+        return maxLabelWidth - Appearance.intraCellPadding * 2
     }
 
     private func updateAppIconsLabelFrame(_ view: ThumbnailView) {
@@ -293,11 +286,13 @@ class ThumbnailView: FlippedView {
         let labelWidth = view.label.cell!.cellSize.width
         let maxAllowedLabelWidth = getMaxAllowedLabelWidth(view)
         let effectiveLabelWidth = max(min(labelWidth, maxAllowedLabelWidth), viewWidth)
-        var leftOffset = CGFloat(0)
+            - (view.isFirstInRow && view.isLastInRow ? 4 : (view.isFirstInRow || view.isLastInRow ? 2 : 0)) * Appearance.intraCellPadding
+        var leftOffset = -Appearance.intraCellPadding * 2
         if view.isFirstInRow && view.isLastInRow {
-            leftOffset = 0
+            leftOffset = -Appearance.intraCellPadding * 2
+
         } else if view.isLastInRow {
-            leftOffset = max(0, effectiveLabelWidth - viewWidth)
+            leftOffset = max(0, effectiveLabelWidth - viewWidth + Appearance.intraCellPadding * 2)
         } else if !view.isFirstInRow && !view.isLastInRow {
             let halfNeededOffset = max(0, (effectiveLabelWidth - viewWidth) / 2)
             let availableLeftWidth = view.isFirstInRow ? 0 : CGFloat(view.indexInRow) * viewWidth
@@ -313,7 +308,7 @@ class ThumbnailView: FlippedView {
             }
         }
         let xPosition = -leftOffset
-        let height = view.label.cell!.cellSize.height
+        let height = view.label.fittingSize.height
         let yPosition = view.hStackView.frame.origin.y + view.hStackView.frame.height + Appearance.intraCellPadding * 2
         view.label.frame = NSRect(x: xPosition, y: yPosition, width: effectiveLabelWidth, height: height)
         view.label.setWidth(effectiveLabelWidth)
@@ -387,7 +382,7 @@ class ThumbnailView: FlippedView {
             hStackView.frame.size = NSSize(width: appIcon.frame.width, height: appIcon.frame.height)
         } else {
             vStackView.frame.size = NSSize(width: frame.width, height: frame.height)
-            hStackView.frame.size = NSSize(width: frame.width - Appearance.edgeInsetsSize * 2, height: max(appIcon.frame.height, label.cell!.cellSize.height))
+            hStackView.frame.size = NSSize(width: frame.width - Appearance.edgeInsetsSize * 2, height: max(appIcon.frame.height, label.fittingSize.height))
             let labelWidth = hStackView.frame.width - appIcon.frame.width - Appearance.appIconLabelSpacing - indicatorsSpace()
             label.setWidth(labelWidth)
         }
@@ -403,7 +398,7 @@ class ThumbnailView: FlippedView {
             appIcon.frame.origin.x = App.shared.userInterfaceLayoutDirection == .leftToRight
                 ? 0
                 : hStackView.frame.width - appIcon.frame.width
-            let iconWidth = windowIndicatorIcons.first!.cell!.cellSize.width
+            let iconWidth = windowIndicatorIcons.first!.fittingSize.width
             var indicatorSpace = CGFloat(0)
             for icon in windowIndicatorIcons {
                 if !icon.isHidden {
@@ -442,18 +437,43 @@ class ThumbnailView: FlippedView {
                 windowlessAppIndicator.frame.origin.x = ((appIcon.frame.width / 2) - (windowlessAppIndicator.frame.width / 2)).rounded()
                     + (App.shared.userInterfaceLayoutDirection == .leftToRight ? 0 : appIcon.frame.origin.x)
             }
-            windowlessAppIndicator.frame.origin.y = windowlessAppIndicator.superview!.frame.height - windowlessAppIndicator.frame.height
+            windowlessAppIndicator.frame.origin.y = windowlessAppIndicator.superview!.frame.height - windowlessAppIndicator.frame.height + 5
         }
         // we set dockLabelIcon origin, without checking if .isHidden
-        // This is because its updated async. We needed it positioned correctly always
-        let iconSize = ThumbnailView.iconSize()
-        dockLabelIcon.frame.origin.x = ((iconSize.width * 0.8) - (dockLabelIcon.fittingSize.width / 2)).rounded()
-        dockLabelIcon.frame.origin.y = ((iconSize.height * 0.8) - (dockLabelIcon.fittingSize.height / 2)).rounded()
-            - (Preferences.appearanceSize == .small ? 2 : 0)
+        // This is because its updated async. We need it positioned correctly always
+        let (offsetX, offsetY) = dockLabelOffset()
+        dockLabelIcon.frame.origin.x = appIcon.frame.maxX - (dockLabelIcon.fittingSize.width * offsetX).rounded()
+        dockLabelIcon.frame.origin.y = appIcon.frame.maxY - (dockLabelIcon.fittingSize.height * offsetY).rounded()
+    }
+
+    /// positioning the dock label is messy because it's an NSTextField so it's visual size doesn't match what we can through APIs
+    // TODO: remove this; find a better way
+    private func dockLabelOffset() -> (CGFloat, CGFloat) {
+        var offsetX = 0.6
+        if Preferences.appearanceStyle == .appIcons {
+            if Preferences.appearanceSize == .small {
+                offsetX = 0.82
+            } else if Preferences.appearanceSize == .medium {
+                offsetX = 0.86
+            } else { // .large
+                offsetX = 0.92
+            }
+        }
+        var offsetY = offsetX
+        if Preferences.appearanceStyle == .appIcons {
+            if Preferences.appearanceSize == .small {
+                offsetY = 0.88
+            } else if Preferences.appearanceSize == .medium {
+                offsetY = 0.90
+            } else { // .large
+                offsetY = 0.92
+            }
+        }
+        return (offsetX, offsetY)
     }
 
     private func indicatorsSpace() -> CGFloat {
-        let iconWidth = windowIndicatorIcons.first!.cell!.cellSize.width
+        let iconWidth = windowIndicatorIcons.first!.fittingSize.width
         return CGFloat(windowIndicatorIcons.filter { !$0.isHidden }.count) * iconWidth
     }
 
@@ -526,6 +546,28 @@ class ThumbnailView: FlippedView {
 
     static func maxThumbnailWidth() -> CGFloat {
         return ThumbnailsPanel.maxThumbnailsWidth() * Appearance.windowMaxWidthInRow - Appearance.interCellPadding * 2
+    }
+
+    static func widthOfComfortableReadability() -> CGFloat? {
+        let labTitleView = ThumbnailTitleView(font: Appearance.font)
+        labTitleView.stringValue = "abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-abcdefghijk" + extraTextForPadding
+        Logger.error(labTitleView.font)
+        return labTitleView.fittingSize.width
+    }
+
+    static func widthOfLongestTitle() -> CGFloat? {
+        let labTitleView = ThumbnailTitleView(font: Appearance.font)
+        var maxWidth = CGFloat(0)
+        for window in Windows.list {
+            guard window.shouldShowTheUser else { continue }
+            labTitleView.stringValue = window.title + extraTextForPadding
+            let width = labTitleView.fittingSize.width
+            if width > maxWidth {
+                maxWidth = width
+            }
+        }
+        guard maxWidth > 0 else { return nil }
+        return maxWidth
     }
 
     static func minThumbnailWidth() -> CGFloat {

@@ -92,8 +92,8 @@ extension NSView {
     }
 
     func centerFrameInParent(x: Bool = false, y: Bool = false) {
-        let selfSize = (self is NSTextField) ? (self as! NSTextField).cell!.cellSize : frame.size
-        let superviewSize = (superview! is NSTextField) ? (superview! as! NSTextField).cell!.cellSize : superview!.frame.size
+        let selfSize = (self is NSTextField) ? (self as! NSTextField).fittingSize : frame.size
+        let superviewSize = (superview! is NSTextField) ? (superview! as! NSTextField).fittingSize : superview!.frame.size
         if (x) {
             frame.origin.x = ((superviewSize.width - selfSize.width) / 2).rounded()
         }
@@ -193,21 +193,10 @@ extension DispatchQoS {
     }
 }
 
-extension NSTextField {
-    func setWidth(_ width: CGFloat) {
-        frame.size.width = width
-        // TODO: NSTextField does some internal magic, and ends up with constraints. We need to add our own to force its size
-        // I wish there was a better way to only set the frame.size
-        addOrUpdateConstraint(widthAnchor, width)
-    }
-}
-
 extension NSImage {
-    func cgImage(maxSize: NSSize) -> CGImage {
-        // some images like NSRunningApp.icon are from icns. They hosts multiple representations and it's hard to know the highest resolution
-        // by setting a maxSize, the returned CGImage will be the biggest it can under that maxSize
-        var rect = NSRect(origin: .zero, size: maxSize)
-        return cgImage(forProposedRect: &rect, context: nil, hints: nil)!
+    func appIconFixedSize(_ size: NSSize) -> CGImage? {
+        var rect = NSRect(origin: .zero, size: size)
+        return cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 
     // NSImage(named) caches/reuses NSImage objects; we force separate instances of images by using copy()

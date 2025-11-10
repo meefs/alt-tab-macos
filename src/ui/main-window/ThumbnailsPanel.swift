@@ -10,10 +10,9 @@ class ThumbnailsPanel: NSPanel {
         isFloatingPanel = true
         animationBehavior = .none
         hidesOnDeactivate = false
-        hasShadow = Appearance.enablePanelShadow
         titleVisibility = .hidden
         backgroundColor = .clear
-        contentView! = thumbnailsView
+        contentView! = thumbnailsView.contentView
         // triggering AltTab before or during Space transition animation brings the window on the Space post-transition
         collectionBehavior = .canJoinAllSpaces
         // 2nd highest level possible; this allows the app to go on top of context menus
@@ -23,6 +22,23 @@ class ThumbnailsPanel: NSPanel {
         setAccessibilitySubrole(.unknown)
         // for VoiceOver
         setAccessibilityLabel(App.name)
+        updateAppearance()
+    }
+
+    func updateAppearance() {
+        hasShadow = Appearance.enablePanelShadow
+        appearance = NSAppearance(named: Appearance.currentTheme == .dark ? .vibrantDark : .vibrantLight)
+    }
+
+    func updateContents() {
+        CATransaction.begin()
+        defer { CATransaction.commit() }
+        CATransaction.setDisableActions(true)
+        thumbnailsView.updateItemsAndLayout()
+        guard App.app.appIsBeingUsed else { return }
+        setContentSize(thumbnailsView.contentView.frame.size)
+        guard App.app.appIsBeingUsed else { return }
+        NSScreen.preferred.repositionPanel(self)
     }
 
     override func orderOut(_ sender: Any?) {
@@ -37,7 +53,7 @@ class ThumbnailsPanel: NSPanel {
     }
 
     func show() {
-        hasShadow = Appearance.enablePanelShadow
+        updateAppearance()
         alphaValue = 1
         makeKeyAndOrderFront(nil)
         MouseEvents.toggle(true)
@@ -45,6 +61,17 @@ class ThumbnailsPanel: NSPanel {
     }
 
     static func maxThumbnailsWidth() -> CGFloat {
+        if Preferences.appearanceStyle == .titles,
+           let readableWidth = ThumbnailView.widthOfComfortableReadability(),
+           let widthOfLongestTitle = ThumbnailView.widthOfLongestTitle() {
+            return (
+                min(
+                    NSScreen.preferred.frame.width * Appearance.maxWidthOnScreen,
+                    readableWidth + Appearance.intraCellPadding * 2 + Appearance.appIconLabelSpacing + Appearance.iconSize,
+                    widthOfLongestTitle + Appearance.intraCellPadding * 2 + Appearance.appIconLabelSpacing + Appearance.iconSize
+                ) - Appearance.windowPadding * 2
+            ).rounded()
+        }
         return (NSScreen.preferred.frame.width * Appearance.maxWidthOnScreen - Appearance.windowPadding * 2).rounded()
     }
 
