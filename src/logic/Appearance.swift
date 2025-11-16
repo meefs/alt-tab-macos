@@ -28,11 +28,10 @@ class Appearance {
 
     // theme: constants
     static let enablePanelShadow = true
-    static let highlightFocusedBackgroundColor = NSColor.systemAccentColor.withAlphaComponent(0.2)
-    static let highlightHoveredBackgroundColor = NSColor.systemAccentColor.withAlphaComponent(0.1)
-    static let highlightFocusedBorderColor = NSColor.systemAccentColor
-    static let highlightHoveredBorderColor = NSColor.systemAccentColor.withAlphaComponent(0.7)
-
+    static var highlightFocusedBackgroundColor: NSColor { get { NSColor.systemAccentColor.withAlphaComponent(0.2) } }
+    static var highlightHoveredBackgroundColor: NSColor { get { NSColor.systemAccentColor.withAlphaComponent(0.1) } }
+    static var highlightFocusedBorderColor: NSColor { get { NSColor.systemAccentColor } }
+    static var highlightHoveredBorderColor: NSColor { get { NSColor.systemAccentColor.withAlphaComponent(0.7) } }
 
     // derived
     static var font: NSFont {
@@ -166,7 +165,7 @@ class Appearance {
                 iconSize = 24
                 fontHeight = 14
             case .large:
-                iconSize = 22
+                iconSize = 30
                 fontHeight = 16
         }
     }
