@@ -1,3 +1,16 @@
+# [7.34.0](https://github.com/lwouis/alt-tab-macos/compare/v7.33.0...v7.34.0) (2025-11-20)
+
+
+### Bug Fixes
+
+* reduce memory footprint after running for a while (closes [#4255](https://github.com/lwouis/alt-tab-macos/issues/4255)) ([938b735](https://github.com/lwouis/alt-tab-macos/commit/938b735))
+
+
+### Features
+
+* improve localizations ([516329a](https://github.com/lwouis/alt-tab-macos/commit/516329a))
+* improve responsiveness in showing switcher (closes [#4959](https://github.com/lwouis/alt-tab-macos/issues/4959)) ([a80721b](https://github.com/lwouis/alt-tab-macos/commit/a80721b))
+
 # [7.33.0](https://github.com/lwouis/alt-tab-macos/compare/v7.32.0...v7.33.0) (2025-11-16)
 
 
@@ -14,8 +27,6 @@
 * improve trackpad multi-fingers swiping (closes [#4765](https://github.com/lwouis/alt-tab-macos/issues/4765)) ([d6196ec](https://github.com/lwouis/alt-tab-macos/commit/d6196ec))
 * improve ux for titles-appearance (closes [#4975](https://github.com/lwouis/alt-tab-macos/issues/4975)) ([c352591](https://github.com/lwouis/alt-tab-macos/commit/c352591))
 * macos tahoe improvements: menubar menu, feedback form, wording ([309cae3](https://github.com/lwouis/alt-tab-macos/commit/309cae3)), closes [#4986](https://github.com/lwouis/alt-tab-macos/issues/4986)
-
-# Release notes
 
 # [7.32.0](https://github.com/lwouis/alt-tab-macos/compare/v7.31.0...v7.32.0) (2025-11-10)
 
