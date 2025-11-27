@@ -4,10 +4,15 @@ import ShortcutRecorder
 final class CustomRecorderControlTests: XCTestCase {
     func testIsShortcutAcceptable() {
         // .accepted
-        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘")!), .accepted)
+        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘")!), .usedByGameOverlay(shortcutUsingGameOverlay: "cancelShortcut"))
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("previousWindowShortcut", Shortcut(keyEquivalent: "⇧⇥")!), .accepted)
         ControlsTab.shortcuts["holdShortcut"] = ATShortcut(Shortcut(keyEquivalent: "⌘⌥")!, "holdShortcut", .global, .up)
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌥")!), .accepted)
+        ControlsTab.shortcuts = ControlsTab.defaultShortcuts
+        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌥")!), .accepted)
+        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("previousWindowShortcut", Shortcut(keyEquivalent: "⇧")!), .accepted)
+        ControlsTab.shortcuts["previousWindowShortcut"] = nil
+        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("previousWindowShortcut", Shortcut(keyEquivalent: "⇧")!), .accepted)
         ControlsTab.shortcuts = ControlsTab.defaultShortcuts
 
         // .modifiersOnlyButContainsKeycode
@@ -15,7 +20,7 @@ final class CustomRecorderControlTests: XCTestCase {
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘e")!), .modifiersOnlyButContainsKeycode)
 
         // .reservedByMacos
-        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘")!), .accepted) // ⌘⎋
+        XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘")!), .usedByGameOverlay(shortcutUsingGameOverlay: "cancelShortcut")) // ⌘⎋
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("previousWindowShortcut", Shortcut(keyEquivalent: "⌘⇧")!), .accepted) // ⌘⎋
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("previousWindowShortcut", Shortcut(keyEquivalent: "⌘⌃⇧")!), .accepted) // ⌘⎋
         XCTAssertEqual(CustomRecorderControlTestable.isShortcutAcceptable("holdShortcut", Shortcut(keyEquivalent: "⌘⌥")!), .reservedByMacos(shortcutUsingEscape: "cancelShortcut")) // ⌘⌥⎋
